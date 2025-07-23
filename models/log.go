@@ -27,7 +27,7 @@ type Service struct {
 }
 
 func NewLog(conn godb.ConnectionManager) *Service {
-	dbName := goenvars.GetEnv("LOGS_DB_NAME", "logs")
+	dbName := goenvars.GetEnv("DB_LOGS_DATABASE", "logs")
 	dbRaw, err := conn.GetRawConnection(dbName)
 	if err != nil {
 		log.Fatalf("Error getting connection: %v", err)
@@ -38,7 +38,7 @@ func NewLog(conn godb.ConnectionManager) *Service {
 		log.Fatalf("Connection is not a MongoDB database: %T", dbRaw)
 	}
 
-	collName := goenvars.GetEnv("LOGS_COLLECTION_NAME", "logs")
+	collName := goenvars.GetEnv("APP_NAME", "logs")
 	if collName == "" {
 		log.Fatal("LOGS_COLLECTION_NAME environment variable is not set")
 	}
