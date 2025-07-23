@@ -29,7 +29,6 @@ func Log(ctx context.Context, args ...interface{}) {
 	if requestID == nil {
 		requestID = "unknown"
 	}
-	log.Println("requestID:", requestID)
 
 	_, file, line, ok := runtime.Caller(1) // 1 para obtener el caller inmediato
 	if !ok {
