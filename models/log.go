@@ -22,12 +22,25 @@ type Logger struct {
 	Line      int    `json:"line" bson:"line"`
 }
 
-type Service struct {
-	repo *mongodb.MongoDBAdapter
+type Driver interface {
+	Insert(ctx context.Context, document bson.M) error
 }
 
-func NewLog(conn godb.ConnectionManager) *Service {
-	dbName := goenvars.GetEnv("DB_LOGS_DATABASE", "logs")
+type mongoDriver struct {
+	adapter *mongodb.MongoDBAdapter
+}
+
+func (m *mongoDriver) Insert(ctx context.Context, document bson.M) error {
+	_, err := m.adapter.Insert(ctx, document)
+	return err
+}
+
+type Service struct {
+	drivers []Driver
+}
+
+func NewMongoDriver(conn godb.ConnectionManager) Driver {
+	dbName := goenvars.GetEnv("DB_LOGS_CONNECTION", "logs")
 	dbRaw, err := conn.GetRawConnection(dbName)
 	if err != nil {
 		log.Fatalf("Error getting connection: %v", err)
@@ -40,12 +53,16 @@ func NewLog(conn godb.ConnectionManager) *Service {
 
 	collName := goenvars.GetEnv("APP_NAME", "logs")
 	if collName == "" {
-		log.Fatal("LOGS_COLLECTION_NAME environment variable is not set")
+		log.Fatal("APP_NAME environment variable is not set")
 	}
 
-	return &Service{
-		repo: mongodb.NewMongoDBAdapter(dbConn.Collection(collName)),
+	return &mongoDriver{
+		adapter: mongodb.NewMongoDBAdapter(dbConn.Collection(collName)),
 	}
+}
+
+func NewService(drivers ...Driver) *Service {
+	return &Service{drivers: drivers}
 }
 
 func (s *Service) CreateLog(ctx context.Context, logData Logger) error {
@@ -55,19 +72,19 @@ func (s *Service) CreateLog(ctx context.Context, logData Logger) error {
 		return err
 	}
 
-	var bson_log bson.M
-	if err := json.Unmarshal(jsonBytes, &bson_log); err != nil {
+	var bsonLog bson.M
+	if err := json.Unmarshal(jsonBytes, &bsonLog); err != nil {
 		log.Println("Error unmarshalling log to bson:", err)
 		return err
 	}
 
-	bson_log["_id"] = helper.GetUuidV7()
-	bson_log["created_at"] = time.Now()
+	bsonLog["_id"] = helper.GetUuidV7()
+	bsonLog["created_at"] = time.Now()
 
-	_, err = s.repo.Insert(ctx, bson_log)
-	if err != nil {
-		return err
+	for _, d := range s.drivers {
+		if err := d.Insert(ctx, bsonLog); err != nil {
+			log.Printf("Error writing log with driver %T: %v", d, err)
+		}
 	}
-
 	return nil
 }
