@@ -127,7 +127,7 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 		Line:      line,
 	})
 
-	header := fmt.Sprintf("[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
+	header := fmt.Sprintf("\n[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
 	fmt.Println(header)
 	if len(args) > 0 {
 		fmt.Println(formatConsoleArgs(args))
