@@ -72,8 +72,8 @@ func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
 			lineInt = int(v)
 		}
 
-		info := fmt.Sprintf("[%s][%s][%s:%d]\n",
-			getTime(), document["level"], document["file"], lineInt)
+		info := fmt.Sprintf("[%s][%s][%s][%s:%d]\n",
+			getTime(), document["request_id"], document["level"], document["file"], lineInt)
 
 		payloadStr := formatPayload(document["payload"])
 		buf.WriteString(info)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,7 +111,7 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 
 	requestID := ctx.Value("request_id")
 	if requestID == nil {
-		requestID = "unknown"
+		requestID = "--"
 	}
 
 	_, fileName, line, ok := runtime.Caller(2)
@@ -126,15 +127,20 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 		Line:      line,
 	})
 
-	header := fmt.Sprintf("[%s][%s][%s:%d]", getTime(), level, fileName, line)
+	header := fmt.Sprintf("[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
 	fmt.Println(header)
 	if len(args) > 0 {
 		fmt.Println(formatConsoleArgs(args))
 	}
 }
 
-func Log(ctx context.Context, args ...interface{})   { baseLog(ctx, "INFO", args...) }
-func Error(ctx context.Context, args ...interface{}) { baseLog(ctx, "ERROR", args...) }
+func Log(ctx context.Context, args ...interface{}) { baseLog(ctx, "INFO", args...) }
+func Error(ctx context.Context, args ...interface{}) {
+	frames := captureStack(0) // 0 = sin límite
+	stackStr := "STACK TRACE:\n" + strings.Join(frames, "\n")
+	args = append(args, stackStr)
+	baseLog(ctx, "ERROR", args...)
+}
 func Debug(ctx context.Context, args ...interface{}) { baseLog(ctx, "DEBUG", args...) }
 
 var (
@@ -200,4 +206,33 @@ func isSimpleConsole(v any) bool {
 		return true
 	}
 	return false
+}
+
+// Captura stack; max=0 sin límite
+func captureStack(max int) []string {
+	const skip = 3 // runtime.Callers, captureStack, Error
+	pcs := make([]uintptr, 64)
+	n := runtime.Callers(skip, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+
+	out := make([]string, 0, n)
+	for {
+		f, more := frames.Next()
+		fn := f.Function
+		if strings.HasPrefix(fn, "runtime.main") {
+			out = append(out, fmt.Sprintf("%s (%s:%d)", fn, f.File, f.Line))
+			break
+		}
+		if strings.HasPrefix(fn, "runtime.goexit") {
+			break
+		}
+		out = append(out, fmt.Sprintf("%s (%s:%d)", fn, f.File, f.Line))
+		if max > 0 && len(out) >= max {
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	return out
 }

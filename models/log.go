@@ -2,7 +2,9 @@ package models
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"reflect"
 	"sync"
 	"time"
 
@@ -115,12 +117,17 @@ func (s *Service) worker() {
 }
 
 func (s *Service) process(ctx context.Context, logData Logger) {
+	sanitized := make([]any, 0, len(logData.Payload))
+	for _, v := range logData.Payload {
+		sanitized = append(sanitized, deepSanitize(v))
+	}
+
 	bsonLog := bson.M{
 		"_id":        helper.GetUuidV7(),
 		"created_at": time.Now(),
 		"level":      logData.Level,
 		"request_id": logData.RequestID,
-		"payload":    logData.Payload,
+		"payload":    sanitized,
 		"file":       logData.File,
 		"line":       logData.Line,
 	}
@@ -128,6 +135,66 @@ func (s *Service) process(ctx context.Context, logData Logger) {
 		if err := d.Insert(ctx, bsonLog); err != nil {
 			log.Printf("Error writing log with driver %T: %v", d, err)
 		}
+	}
+}
+
+// deepSanitize elimina / convierte valores no serializables (funciones, handlers, etc.)
+func deepSanitize(v any) any {
+	if v == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(v)
+	rt := rv.Type()
+
+	switch rt.Kind() {
+	case reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		return fmt.Sprintf("<unserializable:%T>", v)
+	case reflect.Pointer, reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+		return deepSanitize(rv.Elem().Interface())
+	case reflect.Slice, reflect.Array:
+		n := rv.Len()
+		out := make([]any, n)
+		for i := 0; i < n; i++ {
+			out[i] = deepSanitize(rv.Index(i).Interface())
+		}
+		return out
+	case reflect.Map:
+		out := bson.M{}
+		iter := rv.MapRange()
+		for iter.Next() {
+			k := iter.Key()
+			if k.Kind() != reflect.String {
+				out[fmt.Sprintf("%v", k.Interface())] = fmt.Sprintf("<non-string-key:%T>", k.Interface())
+				continue
+			}
+			out[k.String()] = deepSanitize(iter.Value().Interface())
+		}
+		return out
+	case reflect.Struct:
+		// Intentar marshal directo; si falla, convertir a string
+		if _, err := bson.Marshal(v); err != nil {
+			m := bson.M{}
+			for i := 0; i < rt.NumField(); i++ {
+				f := rt.Field(i)
+				if f.PkgPath != "" { // no exportado
+					continue
+				}
+				val := rv.Field(i).Interface()
+				m[f.Name] = deepSanitize(val)
+			}
+			return m
+		}
+		return v
+	default:
+		// Primitivos u otros tipos soportados
+		if _, err := bson.Marshal(bson.M{"v": v}); err != nil {
+			return fmt.Sprintf("<unserializable:%T>", v)
+		}
+		return v
 	}
 }
 
