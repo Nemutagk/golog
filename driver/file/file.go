@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,7 +28,7 @@ func NewFileDriver(basePath string, rotateDaily bool) *FileDriver {
 }
 
 func (f *FileDriver) resolveFilename() (string, error) {
-	filename := "logs.jsonl"
+	filename := "logs.log"
 	if f.rotateDaily {
 		filename = time.Now().Format("2006-01-02") + ".log"
 	}
@@ -38,6 +39,11 @@ func (f *FileDriver) resolveFilename() (string, error) {
 }
 
 func (f *FileDriver) Insert(ctx context.Context, document bson.M) error {
+	return f.InsertMany(ctx, []bson.M{document})
+}
+
+// InsertMany usado por batching
+func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -45,43 +51,40 @@ func (f *FileDriver) Insert(ctx context.Context, document bson.M) error {
 	if err != nil {
 		return err
 	}
-
 	fd, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
+	w := bufio.NewWriterSize(fd, 32*1024)
 
-	// línea
-	var lineInt int
-	switch v := document["line"].(type) {
-	case int:
-		lineInt = v
-	case int32:
-		lineInt = int(v)
-	case int64:
-		lineInt = int(v)
-	case float64:
-		lineInt = int(v)
-	default:
-		lineInt = 0
+	var buf bytes.Buffer
+	for _, document := range docs {
+		lineInt := 0
+		switch v := document["line"].(type) {
+		case int:
+			lineInt = v
+		case int32:
+			lineInt = int(v)
+		case int64:
+			lineInt = int(v)
+		case float64:
+			lineInt = int(v)
+		}
+
+		info := fmt.Sprintf("[%s][%s][%s:%d]\n",
+			getTime(), document["level"], document["file"], lineInt)
+
+		payloadStr := formatPayload(document["payload"])
+		buf.WriteString(info)
+		buf.WriteString(payloadStr)
+		buf.WriteString("\n\n")
 	}
 
-	info := fmt.Sprintf("[%s][%s][%s:%d]\n", getTime(), document["level"], document["file"], lineInt)
-
-	// formatear payload sin corchetes
-	payloadStr := formatPayload(document["payload"])
-
-	var out []byte
-	out = append(out, []byte(info)...)
-	out = append(out, []byte(payloadStr)...)
-	out = append(out, '\n', '\n')
-
-	if _, err := fd.Write(out); err != nil {
+	if _, err := w.Write(buf.Bytes()); err != nil {
 		return err
 	}
-
-	return nil
+	return w.Flush()
 }
 
 func (f *FileDriver) String() string {
@@ -96,12 +99,10 @@ func getTime() string {
 	return time.Now().In(loc).Format("2006-01-02 15:04:05 MST")
 }
 
-// formatea el payload sin envolver todo en []
 func formatPayload(p any) string {
 	if p == nil {
 		return ""
 	}
-
 	switch v := p.(type) {
 	case []interface{}:
 		return joinItems(v)
@@ -135,8 +136,6 @@ func joinItems(items []interface{}) string {
 	if len(items) == 0 {
 		return ""
 	}
-
-	// Si solo hay un elemento y es complejo, devolver pretty JSON directo
 	if len(items) == 1 && !isSimple(items[0]) {
 		j, err := json.MarshalIndent(items[0], "", "  ")
 		if err != nil {
@@ -144,24 +143,19 @@ func joinItems(items []interface{}) string {
 		}
 		return string(j)
 	}
-
 	var b bytes.Buffer
 	for i, it := range items {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-
 		if isSimple(it) {
 			b.WriteString(fmt.Sprint(it))
 			continue
 		}
-
-		// Objeto complejo: separar con nueva línea para legibilidad
 		j, err := json.MarshalIndent(it, "", "  ")
 		if err != nil {
 			b.WriteString(fmt.Sprint(it))
 		} else {
-			// Si no es el primer item y el anterior era simple, mejor insertar salto
 			if i > 0 {
 				b.WriteByte('\n')
 			}

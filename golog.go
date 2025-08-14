@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Nemutagk/goenvars"
+
 	"github.com/Nemutagk/godb"
 	"github.com/Nemutagk/godb/definitions/db"
 	"github.com/Nemutagk/golog/driver/file"
@@ -19,24 +21,14 @@ import (
 var connectManagerOnce sync.Once
 var connectionManager godb.ConnectionManager
 var logService *models.Service
-
-func Init(listConnections map[string]db.DbConnection, opts ...Option) {
-	connectManagerOnce.Do(func() {
-		connectionManager = *godb.InitConnections(listConnections)
-
-		cfg := &config{}
-		for _, o := range opts {
-			o(cfg)
-		}
-		if len(cfg.drivers) == 0 {
-			cfg.drivers = append(cfg.drivers, models.NewMongoDriver(connectionManager))
-		}
-		logService = models.NewService(cfg.drivers...)
-	})
-}
+var closer func()
 
 type config struct {
-	drivers []models.Driver
+	drivers   []models.Driver
+	async     bool
+	workers   int
+	queueSize int
+	batching  bool
 }
 
 type Option func(*config)
@@ -53,6 +45,64 @@ func WithFileDriver(path string, rotateDaily bool) Option {
 	}
 }
 
+func WithAsync(workers, queueSize int) Option {
+	return func(c *config) {
+		c.async = true
+		c.workers = workers
+		c.queueSize = queueSize
+	}
+}
+
+func Init(listConnections map[string]db.DbConnection, opts ...Option) {
+	connectManagerOnce.Do(func() {
+		connectionManager = *godb.InitConnections(listConnections)
+		cfg := &config{}
+		for _, o := range opts {
+			o(cfg)
+		}
+		if len(cfg.drivers) == 0 {
+			cfg.drivers = append(cfg.drivers, models.NewMongoDriver(connectionManager))
+		}
+
+		// Batching por ENV
+		if goenvars.GetEnvBool("LOG_BATCH_ENABLED", true) {
+			cfg.batching = true
+		}
+		if cfg.batching {
+			mSize := goenvars.GetEnvInt("LOG_BATCH_SIZE_MONGO", 50)
+			mFlush := time.Duration(goenvars.GetEnvInt("LOG_BATCH_FLUSH_MS_MONGO", 100)) * time.Millisecond
+			fSize := goenvars.GetEnvInt("LOG_BATCH_SIZE_FILE", 32)
+			fFlush := time.Duration(goenvars.GetEnvInt("LOG_BATCH_FLUSH_MS_FILE", 100)) * time.Millisecond
+
+			for i, d := range cfg.drivers {
+				switch d.(type) {
+				case models.BulkInserter:
+					// Driver que soporta InsertMany (Mongo)
+					cfg.drivers[i] = models.NewBatchDriver(d, mSize, mFlush)
+				case *file.FileDriver:
+					cfg.drivers[i] = models.NewBatchDriver(d, fSize, fFlush)
+				default:
+					// Otros drivers: usar config de archivo como fallback
+					cfg.drivers[i] = models.NewBatchDriver(d, fSize, fFlush)
+				}
+			}
+		}
+
+		if cfg.async {
+			logService = models.NewAsyncService(cfg.workers, cfg.queueSize, cfg.drivers...)
+		} else {
+			logService = models.NewService(cfg.drivers...)
+		}
+		closer = func() { logService.Close() }
+	})
+}
+
+func Close() {
+	if closer != nil {
+		closer()
+	}
+}
+
 func baseLog(ctx context.Context, level string, args ...interface{}) {
 	if connectionManager.Connections == nil || logService == nil {
 		panic("Connection manager not initialized. Call Init() first.")
@@ -65,10 +115,10 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 
 	_, fileName, line, ok := runtime.Caller(2)
 	if !ok {
-		log.Printf("Log llamado desde %s:%d\n", fileName, line)
+		log.Printf("Caller not resolved")
 	}
 
-	logService.CreateLog(ctx, models.Logger{
+	_ = logService.CreateLog(ctx, models.Logger{
 		Level:     level,
 		RequestID: requestID.(string),
 		Payload:   args,
@@ -83,32 +133,29 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 	}
 }
 
-func Log(ctx context.Context, args ...interface{}) {
-	baseLog(ctx, "INFO", args...)
-}
+func Log(ctx context.Context, args ...interface{})   { baseLog(ctx, "INFO", args...) }
+func Error(ctx context.Context, args ...interface{}) { baseLog(ctx, "ERROR", args...) }
+func Debug(ctx context.Context, args ...interface{}) { baseLog(ctx, "DEBUG", args...) }
 
-func Error(ctx context.Context, args ...interface{}) {
-	baseLog(ctx, "ERROR", args...)
-}
-
-func Debug(ctx context.Context, args ...interface{}) {
-	baseLog(ctx, "DEBUG", args...)
-}
+var (
+	tzLoc = func() *time.Location {
+		l, err := time.LoadLocation("America/Mexico_City")
+		if err != nil {
+			return time.Local
+		}
+		return l
+	}()
+	bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+)
 
 func getTime() string {
-	loc, err := time.LoadLocation("America/Mexico_City")
-	if err != nil {
-		loc = time.Local
-	}
-	return time.Now().In(loc).Format("2006-01-02 15:04:05 MST")
+	return time.Now().In(tzLoc).Format("2006-01-02 15:04:05 MST")
 }
 
-// formatea argumentos para la consola (similar a FileDriver)
 func formatConsoleArgs(items []interface{}) string {
 	if len(items) == 0 {
 		return ""
 	}
-	// Un solo elemento complejo -> pretty JSON directo
 	if len(items) == 1 && !isSimpleConsole(items[0]) {
 		j, err := json.MarshalIndent(items[0], "", "  ")
 		if err != nil {
@@ -116,24 +163,25 @@ func formatConsoleArgs(items []interface{}) string {
 		}
 		return string(j)
 	}
-
-	var b bytes.Buffer
+	b := bufPool.Get().(*bytes.Buffer)
+	b.Reset()
+	defer func() {
+		b.Reset()
+		bufPool.Put(b)
+	}()
 	for i, it := range items {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
 		if isSimpleConsole(it) {
-			b.WriteString(fmt.Sprint(it))
+			fmt.Fprint(b, it)
 			continue
 		}
 		j, err := json.MarshalIndent(it, "", "  ")
 		if err != nil {
-			b.WriteString(fmt.Sprint(it))
+			fmt.Fprint(b, it)
 		} else {
-			// Salto de línea antes de bloques complejos si no es el primero
-			if i > 0 {
-				b.WriteByte('\n')
-			}
+			b.WriteByte('\n')
 			b.Write(j)
 		}
 	}
