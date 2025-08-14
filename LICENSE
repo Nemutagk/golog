@@ -1,21 +1,55 @@
-MIT License
+LICENCIA DE USO GRATUITO CON RESTRICCIONES DE COMERCIALIZACIÓN
+Versión 1.0 – 2025-08-14
 
 Copyright (c) 2025 Jose Alberto Cabrera
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Concesión de permiso
+Se concede permiso, de forma gratuita, para:
+- Usar, copiar y modificar el código fuente y los binarios derivados.
+- Integrar el código (original o modificado) dentro de aplicaciones o servicios.
+- Desplegarlo en producción, incluyendo entornos que generen ingresos indirectos (ej. SaaS, consultoría, servicios administrados).
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. Usos permitidos (incluyendo actividades con ingresos)
+Está permitido usar este software en:
+- Plataformas SaaS, donde el cobro se realiza por el uso del servicio y NO por la venta de una licencia del software en sí.
+- Servicios internos o externos (operaciones, automatización, soporte, consultoría).
+- Productos cuyo modelo de ingresos no se base en vender una copia, licencia perpetua, suscripción directa o marketplace listing del software como componente principal.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. Restricciones (NO PERMITIDO)
+Queda expresamente prohibido:
+a) Vender, licenciar, revender o comercializar este software (original o modificado) como un producto de software independiente.
+b) Ofrecer el paquete (o un fork) en marketplaces, tiendas de software o catálogos con un precio directo asociado (incluye venta por descarga, licencias SaaS cuyo valor principal es este código).
+c) Re-etiquetar (rebrand) y distribuirlo como producto comercial propio.
+d) Sub-licenciarlo bajo una licencia más permisiva que elimine estas restricciones.
+e) Incluirlo en bundles cuya propuesta principal sea la entrega del software empaquetado para explotación por terceros (OEM puro).
+
+4. Forks
+Los forks están permitidos siempre que mantengan:
+- Este mismo archivo de licencia (o una versión compatible que preserve las restricciones).
+- Atribución al autor original.
+No pueden eliminar restricciones para permitir venta directa.
+
+5. Atribución
+Debe mantenerse el aviso de copyright y esta licencia en:
+- Archivos fuente modificados o no.
+- Documentación distribuida asociada.
+
+6. Patentes
+No se otorga licencia de patentes de forma explícita. Cualquier uso queda limitado a lo permitido arriba.
+
+7. Ausencia de garantía
+EL SOFTWARE SE PROPORCIONA “TAL CUAL”, SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O IMPLÍCITA, INCLUYENDO PERO NO LIMITADO A COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO LOS AUTORES SERÁN RESPONSABLES DE DAÑOS O RESPONSABILIDADES DERIVADAS DEL USO DEL SOFTWARE.
+
+8. Limitación de responsabilidad
+En la máxima medida permitida por la ley, el autor no será responsable por daños directos, indirectos, incidentales, emergentes, especiales o ejemplares.
+
+9. Terminación
+La licencia termina automáticamente si incumples cualquiera de las cláusulas. Al terminar, debes cesar uso y distribución.
+
+10. Compatibilidad con proyectos open source
+Esta licencia NO es una licencia OSI-aprobada. No debes etiquetar el proyecto como “open source” en contextos donde se requiera una licencia aprobada por OSI.
+
+11. Solicitudes de excepción
+Para un uso no cubierto (por ejemplo empaquetado comercial o redistribución bajo otro esquema), contactar al autor para negociar una licencia comercial separada.
+
+Al usar este software aceptas
