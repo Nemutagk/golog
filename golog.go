@@ -145,11 +145,12 @@ func Debug(ctx context.Context, args ...interface{}) { baseLog(ctx, "DEBUG", arg
 
 var (
 	tzLoc = func() *time.Location {
-		l, err := time.LoadLocation("America/Mexico_City")
+		timezone := goenvars.GetEnv("LOG_TIMEZONE", "America/Mexico_City")
+		loc, err := time.LoadLocation(timezone)
 		if err != nil {
 			return time.Local
 		}
-		return l
+		return loc
 	}()
 	bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 )
