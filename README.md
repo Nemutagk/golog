@@ -8,6 +8,7 @@ Librería de logging extensible con:
 - Rotación diaria opcional de archivos.
 - UUID v7 para cada log.
 - Configuración vía variables de entorno.
+- Personalización del bloque de información en consola (orden y campos).
 
 ## Instalación
 
@@ -49,6 +50,40 @@ Salida consola / archivo (ejemplo):
 Iniciando {"version":"0.2.0"}
 ```
 
+## Personalizar encabezado (bloque) en consola
+
+Ahora se puede definir qué campos y en qué orden se imprimen antes del payload usando la variable de entorno `GOLOG_BLOCKING_INFO`.
+
+Campos disponibles:
+- time
+- level
+- request_id
+- app
+- file  (formato: ruta:línea)
+
+Ejemplo:
+```
+GOLOG_BLOCKING_INFO=app,level,time,file,request_id
+```
+
+Si no se define, default:
+```
+time,request_id,level,file
+```
+
+### Limitar longitud de la ruta del archivo (solo consola)
+`GOLOG_FILE_LIMIT` (entero). Si es > 0 y la ruta excede ese tamaño, se trunca preservando el final:
+```
+GOLOG_FILE_LIMIT=32
+```
+Resultado ejemplo:
+```
+.../cmd/service/internal/handler.go:87
+```
+
+### Timezone
+`LOG_TIMEZONE` (ej: America/Mexico_City). Se restauró soporte de timezone para formateo de hora.
+
 ## Activar modo asíncrono
 
 ```go
@@ -70,7 +105,10 @@ defer golog.Close()
 | LOG_BATCH_SIZE_FILE | 32 | Tamaño batch File |
 | LOG_BATCH_FLUSH_MS_FILE | 100 | Flush timeout File (ms) |
 | DB_LOGS_CONNECTION | logs | Nombre conexión en godb |
-| APP_NAME | logs | Nombre de colección Mongo |
+| APP_NAME | logs | Nombre de colección Mongo y campo app |
+| GOLOG_BLOCKING_INFO | time,request_id,level,file | Orden y campos del bloque en consola |
+| GOLOG_FILE_LIMIT | 0 | Máx caracteres para ruta (0 = sin límite; solo consola) |
+| LOG_TIMEZONE | America/Mexico_City | Timezone para marca de tiempo |
 | (async se configura por código) | - | workers y queueSize |
 
 Lectura con `goenvars.GetEnv*`.

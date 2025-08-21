@@ -127,8 +127,36 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 		Line:      line,
 	})
 
-	header := fmt.Sprintf("\n[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
-	fmt.Println(header)
+	fileNameLimit := goenvars.GetEnvInt("GOLOG_FILE_LIMIT", 0)
+	if fileNameLimit > 0 && len(fileName) > fileNameLimit {
+		fileName = "..." + fileName[len(fileName)-fileNameLimit:]
+	}
+
+	bloqInfo := goenvars.GetEnv("GOLOG_BLOCKING_INFO", "")
+	if bloqInfo == "" {
+		bloqInfo = "time,request_id,level,file"
+	}
+	bloqInfoParts := strings.Split(bloqInfo, ",")
+
+	info := "\n"
+
+	for _, bloq := range bloqInfoParts {
+		switch strings.TrimSpace(bloq) {
+		case "time":
+			info += fmt.Sprintf("[%s]", getTime())
+		case "request_id":
+			info += fmt.Sprintf("[%s]", requestID)
+		case "level":
+			info += fmt.Sprintf("[%s]", level)
+		case "file":
+			info += fmt.Sprintf("[%s:%d]", fileName, line)
+		case "app":
+			info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_NAME", "--"))
+		}
+	}
+
+	// header := fmt.Sprintf("\n[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
+	fmt.Println(info)
 	if len(args) > 0 {
 		fmt.Println(formatConsoleArgs(args))
 	}

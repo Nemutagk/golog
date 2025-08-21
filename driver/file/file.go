@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Nemutagk/goenvars"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -60,20 +62,44 @@ func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
 
 	var buf bytes.Buffer
 	for _, document := range docs {
-		lineInt := 0
-		switch v := document["line"].(type) {
-		case int:
-			lineInt = v
-		case int32:
-			lineInt = int(v)
-		case int64:
-			lineInt = int(v)
-		case float64:
-			lineInt = int(v)
-		}
+		// lineInt := 0
+		// switch v := document["line"].(type) {
+		// case int:
+		// 	lineInt = v
+		// case int32:
+		// 	lineInt = int(v)
+		// case int64:
+		// 	lineInt = int(v)
+		// case float64:
+		// 	lineInt = int(v)
+		// }
 
-		info := fmt.Sprintf("[%s][%s][%s][%s:%d]\n",
-			getTime(), document["request_id"], document["level"], document["file"], lineInt)
+		// info := fmt.Sprintf("[%s][%s][%s][%s:%d]\n",
+		// 	getTime(), document["request_id"], document["level"], document["file"], lineInt)
+
+		bloqInfo := goenvars.GetEnv("GOLOG_BLOCKING_INFO", "")
+		if bloqInfo == "" {
+			bloqInfo = "time,request_id,level,file"
+		}
+		bloqInfoParts := strings.Split(bloqInfo, ",")
+
+		info := ""
+
+		for _, bloq := range bloqInfoParts {
+			switch strings.TrimSpace(bloq) {
+			case "time":
+				info += fmt.Sprintf("[%s]", getTime())
+			case "request_id":
+				info += fmt.Sprintf("[%s]", document["request_id"])
+			case "level":
+				info += fmt.Sprintf("[%s]", document["level"])
+			case "file":
+				info += fmt.Sprintf("[%s:%d]", document["file"], document["line"])
+			case "app":
+				info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_NAME", "--"))
+			}
+		}
+		info += "\n"
 
 		payloadStr := formatPayload(document["payload"])
 		buf.WriteString(info)
