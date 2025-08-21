@@ -79,7 +79,7 @@ func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
 
 		bloqInfo := goenvars.GetEnv("GOLOG_BLOCKING_INFO", "")
 		if bloqInfo == "" {
-			bloqInfo = "time,request_id,level,file"
+			bloqInfo = "level,env,time,request_id,file"
 		}
 		bloqInfoParts := strings.Split(bloqInfo, ",")
 
@@ -97,6 +97,8 @@ func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
 				info += fmt.Sprintf("[%s:%d]", document["file"], document["line"])
 			case "app":
 				info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_NAME", "--"))
+			case "env":
+				info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_ENV", "--"))
 			}
 		}
 		info += "\n"

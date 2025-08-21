@@ -134,7 +134,7 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 
 	bloqInfo := goenvars.GetEnv("GOLOG_BLOCKING_INFO", "")
 	if bloqInfo == "" {
-		bloqInfo = "time,request_id,level,file"
+		bloqInfo = "level,env,time,request_id,file"
 	}
 	bloqInfoParts := strings.Split(bloqInfo, ",")
 
@@ -152,6 +152,8 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 			info += fmt.Sprintf("[%s:%d]", fileName, line)
 		case "app":
 			info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_NAME", "--"))
+		case "env":
+			info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_ENV", "--"))
 		}
 	}
 
