@@ -6,6 +6,8 @@ github.com/Nemutagk/goerrors v1.2.2 h1:4S8uEJw06IcQCFJlAQMoCaTgeri1/3Z/o2haCiZqq
 github.com/Nemutagk/goerrors v1.2.2/go.mod h1:Q+SeEcw23yEFsstLkOBAt7Q4KrL+O4FBK91FgYy5k2g=
 github.com/Nemutagk/goroutes v1.14.3 h1:PNHipRnf1BkU5jKV6N1nt+AL058wGQ/WklMYZETUs1M=
 github.com/Nemutagk/goroutes v1.14.3/go.mod h1:6+dRbKtEK7yYThN7n5qd4f1Fznw8Yme5OtPkXv4z0BI=
+github.com/Nemutagk/goroutes v1.14.4 h1:GUzQp+BZMnBa0G3GQnPX9cEvyNKrwWvJMBJGBSvTb+o=
+github.com/Nemutagk/goroutes v1.14.4/go.mod h1:Kdk2XgCOSlC7b/5/cLc8+2t5P9cfZz9yNDgiIbJCm2w=
 github.com/aws/aws-sdk-go-v2 v1.36.3 h1:mJoei2CxPutQVxaATCzDUjcZEjVRdpsiiXi2o38yqWM=
 github.com/aws/aws-sdk-go-v2 v1.36.3/go.mod h1:LLXuLpgzEbD766Z5ECcRmi8AzSwfZItDtmABVkRLGzg=
 github.com/aws/aws-sdk-go-v2/config v1.29.14 h1:f+eEi/2cKCg9pqKBoAIwRGzVb70MRKqWX4dg1BDcSJM=

@@ -5,7 +5,7 @@ go 1.24.3
 require (
 	github.com/Nemutagk/godb v1.4.0
 	github.com/Nemutagk/goenvars v1.4.0
-	github.com/Nemutagk/goroutes v1.14.3
+	github.com/Nemutagk/goroutes v1.14.4
 	github.com/gofrs/uuid v4.4.0+incompatible
 	go.mongodb.org/mongo-driver v1.17.3
 )
@@ -39,4 +39,4 @@ require (
 	golang.org/x/text v0.20.0 // indirect
 )
 
-replace github.com/Nemutagk/goroutes => /opt/modules/goroutes
+// replace github.com/Nemutagk/goroutes => /opt/modules/goroutes
