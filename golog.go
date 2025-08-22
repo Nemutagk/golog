@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Nemutagk/goenvars"
+	"github.com/Nemutagk/goroutes/definitions"
 
 	"github.com/Nemutagk/godb"
 	"github.com/Nemutagk/godb/definitions/db"
@@ -109,7 +110,7 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 		panic("Connection manager not initialized. Call Init() first.")
 	}
 
-	requestID := ctx.Value("request_id")
+	requestID := ctx.Value(definitions.RequestIDKey)
 	if requestID == nil {
 		requestID = "--"
 	}
@@ -164,7 +165,8 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 	}
 }
 
-func Log(ctx context.Context, args ...interface{}) { baseLog(ctx, "INFO", args...) }
+func Log(ctx context.Context, args ...interface{})     { baseLog(ctx, "INFO", args...) }
+func Warning(ctx context.Context, args ...interface{}) { baseLog(ctx, "WARNING", args...) }
 func Error(ctx context.Context, args ...interface{}) {
 	frames := captureStack(0) // 0 = sin límite
 	stackStr := "STACK TRACE:\n" + strings.Join(frames, "\n")

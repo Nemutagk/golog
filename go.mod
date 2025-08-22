@@ -3,8 +3,15 @@ module github.com/Nemutagk/golog
 go 1.24.3
 
 require (
-	github.com/Nemutagk/godb v1.4.0 // indirect
-	github.com/Nemutagk/goenvars v1.4.0 // indirect
+	github.com/Nemutagk/godb v1.4.0
+	github.com/Nemutagk/goenvars v1.4.0
+	github.com/Nemutagk/goroutes v1.14.3
+	github.com/gofrs/uuid v4.4.0+incompatible
+	go.mongodb.org/mongo-driver v1.17.3
+)
+
+require (
+	github.com/Nemutagk/goerrors v1.2.2 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.29.14 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67 // indirect
@@ -19,7 +26,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19 // indirect
 	github.com/aws/smithy-go v1.22.2 // indirect
-	github.com/gofrs/uuid v4.4.0+incompatible // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
@@ -28,8 +34,9 @@ require (
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	go.mongodb.org/mongo-driver v1.17.3 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/sync v0.9.0 // indirect
+	golang.org/x/text v0.20.0 // indirect
 )
+
+replace github.com/Nemutagk/goroutes => /opt/modules/goroutes
