@@ -62,9 +62,9 @@ func Init(listConnections map[string]db.DbConnection, opts ...Option) {
 		for _, o := range opts {
 			o(cfg)
 		}
-		if len(cfg.drivers) == 0 {
-			cfg.drivers = append(cfg.drivers, models.NewMongoDriver(connectionManager))
-		}
+		// if len(cfg.drivers) == 0 {
+		// 	cfg.drivers = append(cfg.drivers, models.NewMongoDriver(connectionManager))
+		// }
 
 		// Batching por ENV
 		if goenvars.GetEnvBool("LOG_BATCH_ENABLED", true) {
