@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Nemutagk/goenvars"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 type FileDriver struct {
@@ -40,12 +39,12 @@ func (f *FileDriver) resolveFilename() (string, error) {
 	return filepath.Join(f.basePath, filename), nil
 }
 
-func (f *FileDriver) Insert(ctx context.Context, document bson.M) error {
-	return f.InsertMany(ctx, []bson.M{document})
+func (f *FileDriver) Create(ctx context.Context, document map[string]any) error {
+	return f.CreateMany(ctx, []map[string]any{document})
 }
 
-// InsertMany usado por batching
-func (f *FileDriver) InsertMany(ctx context.Context, docs []bson.M) error {
+// CreateMany usado por batching
+func (f *FileDriver) CreateMany(ctx context.Context, docs []map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

@@ -12,16 +12,13 @@ import (
 	"time"
 
 	"github.com/Nemutagk/goenvars"
-	"github.com/Nemutagk/goroutes/definitions"
 
-	"github.com/Nemutagk/godb"
-	"github.com/Nemutagk/godb/definitions/db"
 	"github.com/Nemutagk/golog/driver/file"
+	"github.com/Nemutagk/golog/helper"
 	"github.com/Nemutagk/golog/models"
 )
 
 var connectManagerOnce sync.Once
-var connectionManager godb.ConnectionManager
 var logService *models.Service
 var closer func()
 
@@ -33,11 +30,15 @@ type config struct {
 	batching  bool
 }
 
+type RequestID string
+
+const RequestIDKey RequestID = "request_id"
+
 type Option func(*config)
 
-func WithMongoDriver() Option {
+func WithDatabaseDriver(driver models.Driver) Option {
 	return func(c *config) {
-		c.drivers = append(c.drivers, models.NewMongoDriver(connectionManager))
+		c.drivers = append(c.drivers, driver)
 	}
 }
 
@@ -55,9 +56,8 @@ func WithAsync(workers, queueSize int) Option {
 	}
 }
 
-func Init(listConnections map[string]db.DbConnection, opts ...Option) {
+func Init(opts ...Option) {
 	connectManagerOnce.Do(func() {
-		connectionManager = *godb.InitConnections(listConnections)
 		cfg := &config{}
 		for _, o := range opts {
 			o(cfg)
@@ -78,7 +78,7 @@ func Init(listConnections map[string]db.DbConnection, opts ...Option) {
 
 			for i, d := range cfg.drivers {
 				switch d.(type) {
-				case models.BulkInserter:
+				case models.DriverMany:
 					// Driver que soporta InsertMany (Mongo)
 					cfg.drivers[i] = models.NewBatchDriver(d, mSize, mFlush)
 				case *file.FileDriver:
@@ -106,11 +106,7 @@ func Close() {
 }
 
 func baseLog(ctx context.Context, level string, args ...interface{}) {
-	if connectionManager.Connections == nil || logService == nil {
-		panic("Connection manager not initialized. Call Init() first.")
-	}
-
-	requestID := ctx.Value(definitions.RequestIDKey)
+	requestID := ctx.Value(RequestIDKey)
 	if requestID == nil {
 		requestID = "--"
 	}
@@ -174,6 +170,14 @@ func Error(ctx context.Context, args ...interface{}) {
 	baseLog(ctx, "ERROR", args...)
 }
 func Debug(ctx context.Context, args ...interface{}) { baseLog(ctx, "DEBUG", args...) }
+
+func Sprintf(format string, args ...interface{}) string {
+	return fmt.Sprintf(format, args...)
+}
+
+func Printf(format string, args ...interface{}) {
+	fmt.Printf(format, args...)
+}
 
 var (
 	tzLoc = func() *time.Location {
@@ -268,4 +272,8 @@ func captureStack(max int) []string {
 		}
 	}
 	return out
+}
+
+func GenerateRequestID() string {
+	return fmt.Sprintf("%s", helper.GetUuidV7())
 }

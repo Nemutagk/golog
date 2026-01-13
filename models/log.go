@@ -2,18 +2,14 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"reflect"
 	"sync"
 	"time"
 
-	"github.com/Nemutagk/godb"
-	"github.com/Nemutagk/goenvars"
-	"github.com/Nemutagk/golog/driver/mongodb"
 	"github.com/Nemutagk/golog/helper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Logger struct {
@@ -25,26 +21,31 @@ type Logger struct {
 }
 
 type Driver interface {
-	Insert(ctx context.Context, document bson.M) error
+	Create(ctx context.Context, document map[string]any) error
+}
+
+type DriverMany interface {
+	CreateMany(ctx context.Context, documents []map[string]any) error
 }
 
 // BulkInserter (opcional para batching real)
 type BulkInserter interface {
-	InsertMany(ctx context.Context, documents []bson.M) error
+	Create(ctx context.Context, document map[string]any) error
+	CreateMany(ctx context.Context, documents []map[string]any) error
 }
 
-type mongoDriver struct {
-	adapter *mongodb.MongoDBAdapter
+type dbDriver struct {
+	adapter Driver
 }
 
-func (m *mongoDriver) Insert(ctx context.Context, document bson.M) error {
-	_, err := m.adapter.Insert(ctx, document)
+func (m *dbDriver) Create(ctx context.Context, document map[string]any) error {
+	err := m.adapter.Create(ctx, document)
 	return err
 }
 
-func (m *mongoDriver) InsertMany(ctx context.Context, documents []bson.M) error {
+func (m *dbDriver) CreateMany(ctx context.Context, documents []map[string]any) error {
 	for _, d := range documents {
-		if _, err := m.adapter.Insert(ctx, d); err != nil {
+		if err := m.adapter.Create(ctx, d); err != nil {
 			return err
 		}
 	}
@@ -65,25 +66,6 @@ type Service struct {
 type asyncJob struct {
 	ctx context.Context
 	log Logger
-}
-
-func NewMongoDriver(conn godb.ConnectionManager) Driver {
-	dbName := goenvars.GetEnv("DB_LOGS_CONNECTION", "logs")
-	dbRaw, err := conn.GetRawConnection(dbName)
-	if err != nil {
-		log.Fatalf("Error getting connection: %v", err)
-	}
-	dbConn, ok := dbRaw.(*mongo.Database)
-	if !ok {
-		log.Fatalf("Connection is not a MongoDB database: %T", dbRaw)
-	}
-	collName := goenvars.GetEnv("APP_NAME", "logs")
-	if collName == "" {
-		log.Fatal("APP_NAME environment variable is not set")
-	}
-	return &mongoDriver{
-		adapter: mongodb.NewMongoDBAdapter(dbConn.Collection(collName)),
-	}
 }
 
 func NewService(drivers ...Driver) *Service {
@@ -122,7 +104,7 @@ func (s *Service) process(ctx context.Context, logData Logger) {
 		sanitized = append(sanitized, deepSanitize(v))
 	}
 
-	bsonLog := bson.M{
+	bsonLog := map[string]any{
 		"_id":        helper.GetUuidV7(),
 		"created_at": time.Now(),
 		"level":      logData.Level,
@@ -132,7 +114,7 @@ func (s *Service) process(ctx context.Context, logData Logger) {
 		"line":       logData.Line,
 	}
 	for _, d := range s.drivers {
-		if err := d.Insert(ctx, bsonLog); err != nil {
+		if err := d.Create(ctx, bsonLog); err != nil {
 			log.Printf("Error writing log with driver %T: %v", d, err)
 		}
 	}
@@ -162,22 +144,22 @@ func deepSanitize(v any) any {
 			out[i] = deepSanitize(rv.Index(i).Interface())
 		}
 		return out
-	case reflect.Map:
-		out := bson.M{}
-		iter := rv.MapRange()
-		for iter.Next() {
-			k := iter.Key()
-			if k.Kind() != reflect.String {
-				out[fmt.Sprintf("%v", k.Interface())] = fmt.Sprintf("<non-string-key:%T>", k.Interface())
-				continue
-			}
-			out[k.String()] = deepSanitize(iter.Value().Interface())
-		}
-		return out
+	// case reflect.Map:
+	// 	out := bson.M{}
+	// 	iter := rv.MapRange()
+	// 	for iter.Next() {
+	// 		k := iter.Key()
+	// 		if k.Kind() != reflect.String {
+	// 			out[fmt.Sprintf("%v", k.Interface())] = fmt.Sprintf("<non-string-key:%T>", k.Interface())
+	// 			continue
+	// 		}
+	// 		out[k.String()] = deepSanitize(iter.Value().Interface())
+	// 	}
+	// 	return out
 	case reflect.Struct:
 		// Intentar marshal directo; si falla, convertir a string
-		if _, err := bson.Marshal(v); err != nil {
-			m := bson.M{}
+		if _, err := json.Marshal(v); err != nil {
+			m := map[string]any{}
 			for i := 0; i < rt.NumField(); i++ {
 				f := rt.Field(i)
 				if f.PkgPath != "" { // no exportado
@@ -191,7 +173,7 @@ func deepSanitize(v any) any {
 		return v
 	default:
 		// Primitivos u otros tipos soportados
-		if _, err := bson.Marshal(bson.M{"v": v}); err != nil {
+		if _, err := json.Marshal(map[string]any{"v": v}); err != nil {
 			return fmt.Sprintf("<unserializable:%T>", v)
 		}
 		return v
