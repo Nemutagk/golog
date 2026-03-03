@@ -163,6 +163,14 @@ func joinItems(items []interface{}) string {
 	if len(items) == 0 {
 		return ""
 	}
+
+	if s, ok := items[0].(string); ok {
+		verbs := countFormatVerbs(s)
+		if verbs > 0 && len(items)-1 >= verbs {
+			return fmt.Sprintf(s, items[1:]...)
+		}
+	}
+
 	if len(items) == 1 && !isSimple(items[0]) {
 		j, err := json.MarshalIndent(items[0], "", "  ")
 		if err != nil {
@@ -190,4 +198,33 @@ func joinItems(items []interface{}) string {
 		}
 	}
 	return b.String()
+}
+
+// countFormatVerbs cuenta los "verbs" de fmt en format, ignorando '%%'
+func countFormatVerbs(format string) int {
+	count := 0
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		// '%%' es un literal '%'
+		if i+1 < len(format) && format[i+1] == '%' {
+			i++
+			continue
+		}
+		// avanzar hasta encontrar una letra que puede ser el verbo
+		j := i + 1
+		for j < len(format) && !isAlpha(format[j]) {
+			j++
+		}
+		if j < len(format) {
+			count++
+			i = j
+		}
+	}
+	return count
+}
+
+func isAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
