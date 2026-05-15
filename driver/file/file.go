@@ -167,7 +167,15 @@ func joinItems(items []interface{}) string {
 	if s, ok := items[0].(string); ok {
 		verbs := countFormatVerbs(s)
 		if verbs > 0 && len(items)-1 >= verbs {
-			return fmt.Sprintf(s, items[1:]...)
+			formatted := fmt.Sprintf(s, items[1:verbs+1]...)
+			rest := items[verbs+1:]
+			if len(rest) == 0 {
+				return formatted
+			}
+			rebuilt := make([]interface{}, 0, 1+len(rest))
+			rebuilt = append(rebuilt, formatted)
+			rebuilt = append(rebuilt, rest...)
+			items = rebuilt
 		}
 	}
 

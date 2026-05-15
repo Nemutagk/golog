@@ -1,4 +1,8 @@
 # Changelog
+## Unreleased
+- Añadido modo silencioso (sin consola ni drivers): API `SetSilent` / `IsSilent`, variable de entorno `GOLOG_SILENT` y auto-silenciamiento bajo `go test` (`testing.Testing()`).
+- Corregido `Error(...)` que producía `%!(EXTRA string=STACK TRACE:...)` cuando se le pasaba un format string con verbos (p.ej. `Error(ctx, "msg: %s", err)`). Ahora el stack trace se imprime/almacena por separado y los verbos de formato se resuelven antes de propagar los args al driver, evitando consumir argumentos extra.
+
 ## v0.2.0
 - Añadido pool asíncrono (Service) con cola bloqueante (no se pierden logs).
 - Incorporado soporte de batching para todos los drivers mediante batchDriver (umbral por tamaño y timeout).

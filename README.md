@@ -109,7 +109,29 @@ defer golog.Close()
 | GOLOG_BLOCKING_INFO | time,request_id,level,file | Orden y campos del bloque en consola |
 | GOLOG_FILE_LIMIT | 0 | Máx caracteres para ruta (0 = sin límite; solo consola) |
 | LOG_TIMEZONE | America/Mexico_City | Timezone para marca de tiempo |
+| GOLOG_SILENT | false | Si true, suprime consola y escritura a drivers |
 | (async se configura por código) | - | workers y queueSize |
+
+## Silenciamiento
+
+El logger puede silenciarse para no imprimir a consola ni escribir a drivers.
+
+Mecanismos (de mayor a menor prioridad de aplicación):
+
+1. **API**: `golog.SetSilent(true)` / `golog.SetSilent(false)` y `golog.IsSilent()`.
+2. **Variable de entorno**: `GOLOG_SILENT=true` al iniciar el proceso.
+3. **Auto-detección de tests**: cuando el binario corre bajo `go test`
+   (`testing.Testing()` devuelve `true`), el logger se silencia automáticamente.
+
+En tests siempre puedes forzar la salida temporalmente:
+
+```go
+func TestAlgo(t *testing.T) {
+    golog.SetSilent(false)        // habilita salida solo para este caso
+    defer golog.SetSilent(true)
+    // ...
+}
+```
 
 Lectura con `goenvars.GetEnv*`.
 

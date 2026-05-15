@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/Nemutagk/goenvars"
@@ -21,6 +23,26 @@ import (
 var connectManagerOnce sync.Once
 var logService *models.Service
 var closer func()
+
+// silenced controla el silenciamiento global (sin consola y sin drivers).
+// Se inicializa con detección automática de `go test` y la variable GOLOG_SILENT.
+var silenced atomic.Bool
+
+func init() {
+	if testing.Testing() {
+		silenced.Store(true)
+	}
+	if goenvars.GetEnvBool("GOLOG_SILENT", false) {
+		silenced.Store(true)
+	}
+}
+
+// SetSilent activa o desactiva el modo silencioso en tiempo de ejecución.
+// En modo silencioso no se imprime a consola ni se invoca a los drivers.
+func SetSilent(s bool) { silenced.Store(s) }
+
+// IsSilent reporta si el logger está silenciado.
+func IsSilent() bool { return silenced.Load() }
 
 type config struct {
 	drivers   []models.Driver
@@ -106,20 +128,40 @@ func Close() {
 }
 
 func baseLog(ctx context.Context, level string, args ...interface{}) {
+	baseLogWithTrailer(ctx, level, "", args...)
+}
+
+func baseLogWithTrailer(ctx context.Context, level, trailer string, args ...interface{}) {
+	if silenced.Load() {
+		return
+	}
+
 	requestID := ctx.Value(RequestIDKey)
 	if requestID == nil {
 		requestID = "--"
 	}
 
-	_, fileName, line, ok := runtime.Caller(2)
+	_, fileName, line, ok := runtime.Caller(3)
 	if !ok {
 		log.Printf("Caller not resolved")
+	}
+
+	// Resolver verbos de formato antes de propagar args a drivers / consola,
+	// para que cualquier dato adicional (p.ej. el stack trace) no sea
+	// interpretado por fmt.Sprintf como argumento extra.
+	args = resolveFormatVerbs(args)
+
+	payload := args
+	if trailer != "" {
+		payload = make([]interface{}, 0, len(args)+1)
+		payload = append(payload, args...)
+		payload = append(payload, trailer)
 	}
 
 	_ = logService.CreateLog(ctx, models.Logger{
 		Level:     level,
 		RequestID: requestID.(string),
-		Payload:   args,
+		Payload:   payload,
 		File:      fileName,
 		Line:      line,
 	})
@@ -154,20 +196,48 @@ func baseLog(ctx context.Context, level string, args ...interface{}) {
 		}
 	}
 
-	// header := fmt.Sprintf("\n[%s][%s][%s][%s:%d]", getTime(), requestID, level, fileName, line)
 	fmt.Println(info)
 	if len(args) > 0 {
 		fmt.Println(formatConsoleArgs(args))
 	}
+	if trailer != "" {
+		fmt.Println(trailer)
+	}
+}
+
+// resolveFormatVerbs detecta si args[0] es un format string con verbos y, si
+// hay suficientes argumentos para satisfacerlo, los consume con fmt.Sprintf
+// dejando un único string como primer elemento. Los argumentos sobrantes
+// (más allá de los verbos) se preservan tal cual.
+func resolveFormatVerbs(args []interface{}) []interface{} {
+	if len(args) == 0 {
+		return args
+	}
+	s, ok := args[0].(string)
+	if !ok {
+		return args
+	}
+	verbs := countFormatVerbs(s)
+	if verbs == 0 || len(args)-1 < verbs {
+		return args
+	}
+	formatted := fmt.Sprintf(s, args[1:verbs+1]...)
+	rest := args[verbs+1:]
+	out := make([]interface{}, 0, 1+len(rest))
+	out = append(out, formatted)
+	out = append(out, rest...)
+	return out
 }
 
 func Log(ctx context.Context, args ...interface{})     { baseLog(ctx, "INFO", args...) }
 func Warning(ctx context.Context, args ...interface{}) { baseLog(ctx, "WARNING", args...) }
 func Error(ctx context.Context, args ...interface{}) {
+	if silenced.Load() {
+		return
+	}
 	frames := captureStack(0) // 0 = sin límite
 	stackStr := "STACK TRACE:\n" + strings.Join(frames, "\n")
-	args = append(args, stackStr)
-	baseLog(ctx, "ERROR", args...)
+	baseLogWithTrailer(ctx, "ERROR", stackStr, args...)
 }
 func Debug(ctx context.Context, args ...interface{}) { baseLog(ctx, "DEBUG", args...) }
 
