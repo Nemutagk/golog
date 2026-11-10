@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nemutagk/goenvars"
+	"github.com/Nemutagk/golog/helper"
 )
 
 type FileDriver struct {
@@ -31,9 +30,13 @@ func NewFileDriver(basePath string, rotateDaily bool) *FileDriver {
 func (f *FileDriver) resolveFilename() (string, error) {
 	filename := "logs.log"
 	if f.rotateDaily {
-		filename = time.Now().Format("2006-01-02") + ".log"
+		now := helper.Now()
+		if helper.Config().RotateLocalTime {
+			now = time.Now()
+		}
+		filename = now.Format("2006-01-02") + ".log"
 	}
-	if err := os.MkdirAll(f.basePath, 0o755); err != nil {
+	if err := os.MkdirAll(f.basePath, 0o750); err != nil {
 		return "", err
 	}
 	return filepath.Join(f.basePath, filename), nil
@@ -52,52 +55,37 @@ func (f *FileDriver) CreateMany(ctx context.Context, docs []map[string]any) erro
 	if err != nil {
 		return err
 	}
-	fd, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	fd, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
-	w := bufio.NewWriterSize(fd, 32*1024)
 
+	cfg := helper.Config()
 	var buf bytes.Buffer
 	for _, document := range docs {
-		// lineInt := 0
-		// switch v := document["line"].(type) {
-		// case int:
-		// 	lineInt = v
-		// case int32:
-		// 	lineInt = int(v)
-		// case int64:
-		// 	lineInt = int(v)
-		// case float64:
-		// 	lineInt = int(v)
-		// }
-
-		// info := fmt.Sprintf("[%s][%s][%s][%s:%d]\n",
-		// 	getTime(), document["request_id"], document["level"], document["file"], lineInt)
-
-		bloqInfo := goenvars.GetEnv("GOLOG_BLOCKING_INFO", "")
-		if bloqInfo == "" {
-			bloqInfo = "level,env,time,request_id,file"
-		}
-		bloqInfoParts := strings.Split(bloqInfo, ",")
-
 		info := ""
 
-		for _, bloq := range bloqInfoParts {
-			switch strings.TrimSpace(bloq) {
+		for _, bloq := range cfg.HeaderBlocks {
+			switch bloq {
 			case "time":
-				info += fmt.Sprintf("[%s]", getTime())
+				// La hora del log es su created_at, no la hora en que se escribe
+				// el archivo (el batching puede retrasarla).
+				at := time.Now()
+				if t, ok := document["created_at"].(time.Time); ok {
+					at = t
+				}
+				info += fmt.Sprintf("[%s]", helper.FormatTime(at))
 			case "request_id":
-				info += fmt.Sprintf("[%s]", document["request_id"])
+				info += sanitizeHeaderField(fmt.Sprintf("[%s]", document["request_id"]))
 			case "level":
 				info += fmt.Sprintf("[%s]", document["level"])
 			case "file":
 				info += fmt.Sprintf("[%s:%d]", document["file"], document["line"])
 			case "app":
-				info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_NAME", "--"))
+				info += fmt.Sprintf("[%s]", cfg.AppName)
 			case "env":
-				info += fmt.Sprintf("[%s]", goenvars.GetEnv("APP_ENV", "--"))
+				info += fmt.Sprintf("[%s]", cfg.AppEnv)
 			}
 		}
 		info += "\n"
@@ -108,22 +96,14 @@ func (f *FileDriver) CreateMany(ctx context.Context, docs []map[string]any) erro
 		buf.WriteString("\n\n")
 	}
 
-	if _, err := w.Write(buf.Bytes()); err != nil {
+	if _, err := fd.Write(buf.Bytes()); err != nil {
 		return err
 	}
-	return w.Flush()
+	return nil
 }
 
 func (f *FileDriver) String() string {
 	return fmt.Sprintf("FileDriver(path=%s rotateDaily=%v)", f.basePath, f.rotateDaily)
-}
-
-func getTime() string {
-	loc, err := time.LoadLocation("America/Mexico_City")
-	if err != nil {
-		loc = time.Local
-	}
-	return time.Now().In(loc).Format("2006-01-02 15:04:05 MST")
 }
 
 func formatPayload(p any) string {
@@ -134,7 +114,7 @@ func formatPayload(p any) string {
 	case []interface{}:
 		return joinItems(v)
 	default:
-		if isSimple(v) {
+		if helper.IsSimple(v) {
 			return fmt.Sprint(v)
 		}
 		j, err := json.MarshalIndent(v, "", "  ")
@@ -145,18 +125,12 @@ func formatPayload(p any) string {
 	}
 }
 
-func isSimple(v any) bool {
-	switch v.(type) {
-	case string, fmt.Stringer,
-		int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		float32, float64,
-		bool,
-		time.Time,
-		json.Number:
-		return true
-	}
-	return false
+// sanitizeHeaderField evita que un request_id con \n o \r falsifique líneas
+// de log en el archivo. Solo aplica al encabezado, nunca al payload.
+func sanitizeHeaderField(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
 }
 
 func joinItems(items []interface{}) string {
@@ -164,22 +138,7 @@ func joinItems(items []interface{}) string {
 		return ""
 	}
 
-	if s, ok := items[0].(string); ok {
-		verbs := countFormatVerbs(s)
-		if verbs > 0 && len(items)-1 >= verbs {
-			formatted := fmt.Sprintf(s, items[1:verbs+1]...)
-			rest := items[verbs+1:]
-			if len(rest) == 0 {
-				return formatted
-			}
-			rebuilt := make([]interface{}, 0, 1+len(rest))
-			rebuilt = append(rebuilt, formatted)
-			rebuilt = append(rebuilt, rest...)
-			items = rebuilt
-		}
-	}
-
-	if len(items) == 1 && !isSimple(items[0]) {
+	if len(items) == 1 && !helper.IsSimple(items[0]) {
 		j, err := json.MarshalIndent(items[0], "", "  ")
 		if err != nil {
 			return fmt.Sprint(items[0])
@@ -191,7 +150,7 @@ func joinItems(items []interface{}) string {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		if isSimple(it) {
+		if helper.IsSimple(it) {
 			b.WriteString(fmt.Sprint(it))
 			continue
 		}
@@ -206,33 +165,4 @@ func joinItems(items []interface{}) string {
 		}
 	}
 	return b.String()
-}
-
-// countFormatVerbs cuenta los "verbs" de fmt en format, ignorando '%%'
-func countFormatVerbs(format string) int {
-	count := 0
-	for i := 0; i < len(format); i++ {
-		if format[i] != '%' {
-			continue
-		}
-		// '%%' es un literal '%'
-		if i+1 < len(format) && format[i+1] == '%' {
-			i++
-			continue
-		}
-		// avanzar hasta encontrar una letra que puede ser el verbo
-		j := i + 1
-		for j < len(format) && !isAlpha(format[j]) {
-			j++
-		}
-		if j < len(format) {
-			count++
-			i = j
-		}
-	}
-	return count
-}
-
-func isAlpha(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }

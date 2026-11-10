@@ -2,6 +2,40 @@
 ## Unreleased
 - Añadido modo silencioso (sin consola ni drivers): API `SetSilent` / `IsSilent`, variable de entorno `GOLOG_SILENT` y auto-silenciamiento bajo `go test` (`testing.Testing()`).
 - Corregido `Error(...)` que producía `%!(EXTRA string=STACK TRACE:...)` cuando se le pasaba un format string con verbos (p.ej. `Error(ctx, "msg: %s", err)`). Ahora el stack trace se imprime/almacena por separado y los verbos de formato se resuelven antes de propagar los args al driver, evitando consumir argumentos extra.
+- Añadido adaptador de base de datos (`driver/database`): `NewDatabaseDriverAdapter` envuelve un objeto provisto por el usuario (`models.Driver`, y opcionalmente `models.DriverMany`). golog ya no depende de ningún driver de DB.
+- Corregido: `Close()` del batch driver no esperaba el flush final y podía perder el último lote.
+- Corregido: `Log/Warning/Error/Debug` hacían panic si no se había llamado `Init` (ahora solo imprimen en consola).
+- Corregido: `Error` reportaba archivo y línea del llamador equivocado.
+- Corregido: `LOG_BATCH_SIZE_FILE` y `LOG_BATCH_FLUSH_MS_FILE` no se aplicaban al FileDriver (usaba la config `*_MONGO`). Ahora el FileDriver usa la suya. Cambio de comportamiento: el batch efectivo del archivo pasa de 50 a 32 por defecto.
+- Corregido: panic si el `request_id` del contexto no era `string` (ahora acepta `string`, `RequestID` u otro tipo).
+- Corregido: `CreateLog` tras `Close()` en modo async hacía panic; ahora devuelve error.
+- Corregido: detección de verbos de formato demasiado laxa (p.ej. `"50% completado"`) y formateo aplicado hasta tres veces. Ahora es estricta y se resuelve una sola vez. Cambio de comportamiento: `"% d"` (espacio tras `%`) ya no se detecta como verbo; el FileDriver usado directamente ya no reformatea los payloads.
+- Corregido: FileDriver ignoraba `LOG_TIMEZONE` para la hora. La rotación diaria ahora también usa `LOG_TIMEZONE` (antes, la hora local del servidor). Nuevo `LOG_ROTATE_LOCAL_TIME=true` para conservar la hora local. Cambio de comportamiento: el corte de día pasa a la zona de `LOG_TIMEZONE` por defecto.
+- Cambiado: el flush por tamaño del batch lo hace una goroutine de fondo y ya no bloquea al llamador. Los inserts de fondo usan `context.Background()` en lugar del contexto de la petición.
+- Cambiado: la cola async es FIFO, con tope y no bloquea a quien loguea (antes un canal con tamaño fijo que bloqueaba al llenarse). Se usa un único worker para conservar el orden de los logs: el parámetro `workers` de `WithAsync` se conserva por compatibilidad pero se ignora; `queueSize` es solo la capacidad inicial. `created_at` ahora es el momento en que se emitió el log (antes, cuando el worker lo procesaba). Cambio de comportamiento: la cola tiene un tope configurable `LOG_QUEUE_MAX` (default 10000, también aplicado al buffer del batch); al llegar se descartan los logs nuevos y se avisa por stderr, nunca se bloquea ni crece la memoria sin límite.
+- Corregido: `Service.Close()` ahora es idempotente (antes, en modo síncrono, cerraba los drivers en cada llamada).
+- Cambiado: `go.mod` pasa a Go 1.27 y se elimina `gofrs/uuid`; el UUID v7 se genera con el paquete estándar `uuid`. Cambio de comportamiento: se requiere Go 1.27 o superior.
+- Añadido en `helper`: `Now`, `GetTime`, `CountFormatVerbs`, `IsAlpha`, `IsSimple`.
+- Corregido: el adaptador de DB sin `CreateMany` insertaba duplicados si fallaba a mitad de un lote (el batch reinsertaba todo). Ahora inserta uno a uno y registra los fallos sin devolver error. Cambio de comportamiento: `DatabaseDriverAdapter.CreateMany` ya no devuelve el error de inserts individuales.
+- Corregido: la hora `[time]` del archivo era la de escritura; ahora es la del log (`created_at`). Nuevo `helper.FormatTime`.
+- Cambiado: los archivos se crean con `0640` y el directorio con `0750` (antes `0644`/`0755`). Cambio de comportamiento: otros usuarios del host ya no pueden leer los logs nuevos; los archivos existentes no cambian.
+- Corregido: un `request_id` con `\n`/`\r` podía falsificar líneas de log; se sanitiza en el encabezado (consola y archivo).
+- Corregido: la consola imprimía el log en varias escrituras que se intercalaban entre goroutines; ahora es una sola (misma salida).
+- Corregido: un panic en un driver, en un `MarshalJSON` o al sanitizar tumbaba la app (worker async y flush del batch). Ahora se captura y se registra; un driver que falla no impide entregar el log a los demás.
+- Corregido: un ciclo de punteros en el payload causaba `stack overflow`; se limita la profundidad a 32 (`<max depth>`).
+- Corregido: los mapas del payload se compartían con el llamador y se serializaban en segundo plano (data race / `concurrent map iteration and map write`). Ahora se copian, y en modo async el payload se sanitiza antes de encolar. Los structs siguen copiándose de forma superficial.
+- Añadido: `LOG_DRIVER_TIMEOUT_MS` (default 30000), timeout por llamada a driver, para que uno atascado no bloquee el worker ni `Close()` (solo aplica a drivers que respetan el `context`).
+- Corregido: los errores del fallback del batch se descartaban en silencio; ahora se cuentan y se registra cuántos fallaron.
+- Corregido: la sanitización (reflexión) se hacía aunque el log se fuera a descartar por cola llena o servicio cerrado; ahora se comprueba antes.
+- Corregido: los logs emitidos después de `Close()` se perdían en silencio en el batch; ahora se insertan de forma síncrona.
+- Corregido: `logService` se leía sin sincronización mientras `Init` lo escribía (data race); ahora es `atomic.Pointer`.
+- Corregido: el worker async reservaba un slice del tamaño de la mayor ráfaga por cada log posterior (con el lock tomado); ahora reutiliza el buffer.
+- Cambiado: golog ya no depende de goenvars ni de ninguna librería externa (el `go.mod` queda sin dependencias). Elimina el árbol de AWS SDK y evita que golog cargue el `.env` al importarse. Las variables ya no se leen al importar el paquete sino en `Init`.
+- Añadido: toda la configuración se puede fijar con opciones de `Init`: `WithSilent`, `WithTimezone`, `WithRotateLocalTime`, `WithBatching`, `WithFileBatch`, `WithDatabaseBatch`, `WithQueueMax`, `WithDriverTimeout`, `WithHeaderBlocks`, `WithFileNameLimit`, `WithAppName`, `WithAppEnv`. Prioridad: opción > variable de entorno > default.
+- DEPRECADO: las variables de entorno (`GOLOG_SILENT`, `LOG_TIMEZONE`, `LOG_ROTATE_LOCAL_TIME`, `LOG_BATCH_*`, `LOG_QUEUE_MAX`, `LOG_DRIVER_TIMEOUT_MS`, `GOLOG_BLOCKING_INFO`, `GOLOG_FILE_LIMIT`, `APP_NAME`, `APP_ENV`) siguen funcionando como respaldo pero se eliminarán en una versión futura; `Init` avisa por stderr de las que se estén usando. Cambio de comportamiento: se leen con `os.Getenv` (si usas un `.env`, cárgalo antes de `Init`) y un valor vacío cuenta como no definido.
+- Añadido en `helper`: `Settings`, `Config`, `SetSettings`, `ResetSettings`, `SettingsFromEnv`.
+- Corregido: un intervalo de batching `<= 0` (p. ej. `LOG_BATCH_FLUSH_MS_FILE=0`) dejaba una goroutine al 100 % de CPU; ahora usa 100 ms.
+- Limpieza: eliminado código comentado, `bufio` redundante y funciones duplicadas; README actualizado (licencia, variables de entorno, drivers).
 
 ## v0.2.0
 - Añadido pool asíncrono (Service) con cola bloqueante (no se pierden logs).

@@ -1,13 +1,14 @@
 # golog
 
 Librería de logging extensible con:
-- Drivers múltiples (MongoDB, archivos; fácil extender).
-- Modo síncrono o asíncrono (pool de workers, cola bloqueante sin pérdida).
+- Drivers múltiples (archivo y base de datos mediante un adaptador propio; fácil extender).
+- Modo síncrono o asíncrono (cola FIFO con tope, sin bloqueo para quien loguea, un worker y orden conservado).
 - Batching (tamaño y timeout configurables por driver).
 - Formato legible en consola y archivos (pretty JSON para objetos complejos).
 - Rotación diaria opcional de archivos.
 - UUID v7 para cada log.
-- Configuración vía variables de entorno.
+- Configuración por opciones de `golog.Init` (las variables de entorno están **deprecadas**, ver más abajo).
+- Sin dependencias externas (solo la biblioteca estándar de Go).
 - Personalización del bloque de información en consola (orden y campos).
 
 ## Instalación
@@ -22,8 +23,8 @@ go get github.com/Nemutagk/golog
 |-------------|------------------------------------------------------------------------------|
 | Driver      | Implementa Insert (y opcionalmente InsertMany)                              |
 | BatchDriver | Wrapper que agrupa logs por tamaño o tiempo                                  |
-| Service     | Orquesta drivers; puede ser síncrono o async (workers + cola)                |
-| Async       | Evita bloquear el flujo principal hasta que se llenen workers / backpressure |
+| Service     | Orquesta drivers; puede ser síncrono o async (cola FIFO + un worker)         |
+| Async       | Encola sin bloquear el flujo principal y entrega los logs en orden           |
 | Batching    | Reduce syscalls y round trips (mejor throughput)                            |
 
 ## Uso básico
@@ -31,10 +32,10 @@ go get github.com/Nemutagk/golog
 ```go
 import "github.com/Nemutagk/golog"
 
-// Inicializar conexiones DB (usando godb) y luego:
-golog.Init(conns,
-  golog.WithMongoDriver(),
+// Sin drivers: solo consola. Con drivers, se agregan por opciones:
+golog.Init(
   golog.WithFileDriver("./logs", true), // path, rotación diaria
+  golog.WithDatabaseDriver(database.NewDatabaseDriverAdapter(miAdaptador)), // opcional, ver "Driver de base de datos"
 )
 defer golog.Close()
 
@@ -59,6 +60,7 @@ Campos disponibles:
 - level
 - request_id
 - app
+- env   (variable `APP_ENV`)
 - file  (formato: ruta:línea)
 
 Ejemplo:
@@ -68,7 +70,7 @@ GOLOG_BLOCKING_INFO=app,level,time,file,request_id
 
 Si no se define, default:
 ```
-time,request_id,level,file
+level,env,time,request_id,file
 ```
 
 ### Limitar longitud de la ruta del archivo (solo consola)
@@ -82,35 +84,76 @@ Resultado ejemplo:
 ```
 
 ### Timezone
-`LOG_TIMEZONE` (ej: America/Mexico_City). Se restauró soporte de timezone para formateo de hora.
+`LOG_TIMEZONE` (ej: America/Mexico_City, default). Se usa para la marca de tiempo en consola y archivo, y también para el nombre del archivo con rotación diaria.
+
+**Rotación diaria y timezone:** el nombre del archivo (`YYYY-MM-DD.log`) y el momento en que cambia de día se calculan con `LOG_TIMEZONE`, no con la hora local del servidor. Si tu servidor corre en una zona distinta (p. ej. UTC), el corte de día ocurre a medianoche de `LOG_TIMEZONE`. Para usar la hora local del servidor, define `LOG_ROTATE_LOCAL_TIME=true`.
+
+> Versiones anteriores rotaban siempre con la hora local del servidor. Si dependes de ese comportamiento, define `LOG_ROTATE_LOCAL_TIME=true`.
 
 ## Activar modo asíncrono
 
 ```go
-golog.Init(conns,
-  golog.WithMongoDriver(),
+golog.Init(
   golog.WithFileDriver("./logs", true),
-  golog.WithAsync(8, 800), // 8 workers, cola buffer 800 (envía bloqueando si llena)
+  golog.WithAsync(1, 800), // workers se ignora (un solo worker para conservar el orden); 800 = capacidad inicial de la cola
 )
 defer golog.Close()
 ```
 
-## Variables de entorno
+## Configuración
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| LOG_BATCH_ENABLED | true | Activa batching global |
-| LOG_BATCH_SIZE_MONGO | 50 | Tamaño batch Mongo |
-| LOG_BATCH_FLUSH_MS_MONGO | 100 | Flush timeout Mongo (ms) |
-| LOG_BATCH_SIZE_FILE | 32 | Tamaño batch File |
-| LOG_BATCH_FLUSH_MS_FILE | 100 | Flush timeout File (ms) |
-| DB_LOGS_CONNECTION | logs | Nombre conexión en godb |
-| APP_NAME | logs | Nombre de colección Mongo y campo app |
-| GOLOG_BLOCKING_INFO | time,request_id,level,file | Orden y campos del bloque en consola |
-| GOLOG_FILE_LIMIT | 0 | Máx caracteres para ruta (0 = sin límite; solo consola) |
-| LOG_TIMEZONE | America/Mexico_City | Timezone para marca de tiempo |
-| GOLOG_SILENT | false | Si true, suprime consola y escritura a drivers |
-| (async se configura por código) | - | workers y queueSize |
+Todo se configura con opciones de `golog.Init`. Prioridad: **opción > variable de entorno (deprecada) > default**.
+
+| Opción | Default | Descripción |
+|--------|---------|-------------|
+| `WithFileDriver(path, rotateDaily)` | - | Driver de archivo |
+| `WithDatabaseDriver(driver)` | - | Driver de base de datos (ver "Driver de base de datos") |
+| `WithAsync(workers, queueSize)` | desactivado | Cola async. `workers` se conserva por compatibilidad pero se usa un solo worker; `queueSize` es la capacidad inicial |
+| `WithQueueMax(n)` | 10000 | Tope de logs pendientes por cola (async y por cada batch); al llegar se descartan los nuevos |
+| `WithDriverTimeout(d)` | 30s | Timeout por llamada a un driver (el contexto que recibe lo cancela) |
+| `WithBatching(enabled)` | true | Activa el batching |
+| `WithFileBatch(size, flush)` | 32, 100ms | Tamaño e intervalo del batch del driver de archivo |
+| `WithDatabaseBatch(size, flush)` | 50, 100ms | Tamaño e intervalo del batch de drivers con `CreateMany` (base de datos) |
+| `WithHeaderBlocks(blocks...)` | level, env, time, request_id, file | Campos y orden del encabezado en consola y archivo (también `app`) |
+| `WithFileNameLimit(n)` | 0 | Máx. caracteres de la ruta en consola (0 = sin límite) |
+| `WithAppName(name)` | `--` | Valor del bloque `app` |
+| `WithAppEnv(env)` | `--` | Valor del bloque `env` |
+| `WithTimezone(tz)` | America/Mexico_City | Zona de la marca de tiempo y de la rotación diaria |
+| `WithRotateLocalTime(bool)` | false | La rotación diaria usa la hora local del servidor |
+| `WithSilent(bool)` | false | Silencia consola y drivers (ver "Silenciamiento") |
+
+```go
+golog.Init(
+  golog.WithFileDriver("./logs", true),
+  golog.WithAppName("mi-app"),
+  golog.WithAppEnv("prod"),
+  golog.WithTimezone("America/Bogota"),
+  golog.WithQueueMax(50000),
+)
+```
+
+Los valores inválidos (tamaños, tope o timeout `<= 0`) se ignoran y se usa el default.
+
+### Variables de entorno (DEPRECADAS)
+
+> **Deprecadas:** las variables de entorno siguen funcionando como respaldo, pero **se eliminarán en una versión futura**. Migra a las opciones de arriba. Si se usa alguna que ninguna opción sobrescribió, `Init` imprime un aviso por stderr con su nombre.
+
+golog las lee con `os.Getenv` al iniciar (no al importarse), así que si cargas un `.env` hazlo antes de llamar a `Init`. Un valor vacío cuenta como no definido. Ya no usa goenvars.
+
+| Variable | Equivale a |
+|----------|------------|
+| LOG_QUEUE_MAX | `WithQueueMax` |
+| LOG_DRIVER_TIMEOUT_MS | `WithDriverTimeout` (en ms) |
+| LOG_BATCH_ENABLED | `WithBatching` |
+| LOG_BATCH_SIZE_MONGO, LOG_BATCH_FLUSH_MS_MONGO | `WithDatabaseBatch` |
+| LOG_BATCH_SIZE_FILE, LOG_BATCH_FLUSH_MS_FILE | `WithFileBatch` |
+| APP_NAME | `WithAppName` |
+| APP_ENV | `WithAppEnv` |
+| GOLOG_BLOCKING_INFO | `WithHeaderBlocks` (lista separada por comas) |
+| GOLOG_FILE_LIMIT | `WithFileNameLimit` |
+| LOG_TIMEZONE | `WithTimezone` |
+| LOG_ROTATE_LOCAL_TIME | `WithRotateLocalTime` |
+| GOLOG_SILENT | `WithSilent` |
 
 ## Silenciamiento
 
@@ -119,7 +162,7 @@ El logger puede silenciarse para no imprimir a consola ni escribir a drivers.
 Mecanismos (de mayor a menor prioridad de aplicación):
 
 1. **API**: `golog.SetSilent(true)` / `golog.SetSilent(false)` y `golog.IsSilent()`.
-2. **Variable de entorno**: `GOLOG_SILENT=true` al iniciar el proceso.
+2. **Opción**: `golog.WithSilent(true)` en `Init` (o, deprecada, la variable `GOLOG_SILENT=true`).
 3. **Auto-detección de tests**: cuando el binario corre bajo `go test`
    (`testing.Testing()` devuelve `true`), el logger se silencia automáticamente.
 
@@ -133,14 +176,14 @@ func TestAlgo(t *testing.T) {
 }
 ```
 
-Lectura con `goenvars.GetEnv*`.
-
 ## Batching
 
 Criterios de flush:
-- Al alcanzar tamaño (SIZE)
+- Al alcanzar tamaño (SIZE): lo hace una única goroutine de fondo; quien loguea nunca espera y el orden se conserva.
 - Al vencer intervalo (FLUSH_MS)
-- Al cerrar (`golog.Close()`)
+- Al cerrar (`golog.Close()`): espera a que termine el flush final.
+
+Los logs se insertan en el mismo orden en que se emitieron.
 
 Trade-offs:
 - Añade latencia micro (<= flush_ms)
@@ -159,24 +202,50 @@ Ajuste:
 ## FileDriver
 
 - Escribe formato humano.
-- Rotación diaria si `rotateDaily=true`.
+- Los archivos se crean con permisos `0640` y el directorio con `0750` (sujetos al umask; los ya existentes no se modifican).
+- La hora del encabezado `[time]` es la del momento en que se emitió el log, no la de la escritura.
+- El `request_id` del encabezado se escribe sin saltos de línea (`\n`/`\r` se reemplazan por espacio) para que no pueda falsificar entradas.
+- Rotación diaria si `rotateDaily=true` (por `LOG_TIMEZONE`, o por hora local con `LOG_ROTATE_LOCAL_TIME=true`).
 - Un log por línea (más payload pretty debajo).
 - Usa buffer (32 KiB) para reducir syscalls.
 - Batching adicional agrupa múltiples logs antes de flush.
+
+## Driver de base de datos (adaptador)
+
+golog no incluye ni invoca ningún driver de base de datos. Tú entregas un objeto que implemente `models.Driver` y golog arma los documentos y administra todo el flujo (batching, async, cierre).
+
+```go
+// Obligatorio:
+type models.Driver interface {
+    Create(ctx context.Context, document map[string]any) error
+}
+// Opcional (inserción por lotes; si no lo implementas, se inserta uno a uno):
+type models.DriverMany interface {
+    CreateMany(ctx context.Context, documents []map[string]any) error
+}
+
+golog.Init(
+  golog.WithDatabaseDriver(database.NewDatabaseDriverAdapter(miAdaptador)),
+)
+```
+
+Si el adaptador no implementa `CreateMany`, los inserts van uno a uno y un fallo se registra por stderr sin reintentar el lote (evita duplicados). Si implementa `CreateMany` y este falla, el batch reintenta cada documento por separado **con el mismo `_id`**, así que el adaptador debe tolerar duplicados de `_id` (p. ej. clave única).
+
+Cada documento incluye: `_id` (UUID v7), `created_at`, `level`, `request_id`, `payload`, `file` y `line`.
 
 ## Extender: Nuevo driver
 
 ```go
 type MyDriver struct{}
-func (d *MyDriver) Insert(ctx context.Context, doc bson.M) error { /* ... */ return nil }
+func (d *MyDriver) Create(ctx context.Context, doc map[string]any) error { /* ... */ return nil }
 // (Opcional)
-func (d *MyDriver) InsertMany(ctx context.Context, docs []bson.M) error { /* ... */ return nil }
+func (d *MyDriver) CreateMany(ctx context.Context, docs []map[string]any) error { /* ... */ return nil }
 
 // Registro:
-golog.Init(conns, func(c *config){ c.drivers = append(c.drivers, &MyDriver{}) })
+golog.Init(golog.WithDatabaseDriver(&MyDriver{}))
 ```
 
-Si implementas InsertMany el batchDriver lo usará.
+Si implementas `CreateMany` el batchDriver lo usará.
 
 ## Shutdown
 
@@ -188,9 +257,11 @@ Garantiza flush de:
 - Batches pendientes
 - Cola async (workers)
 
-## Backpressure
+## Cola y orden
 
-Cola bloqueante: si workers saturan, la goroutine productora espera en `s.jobs <-`. No se pierden logs. Ajusta queueSize para suavizar picos.
+La cola (async y batching) es FIFO: quien llama a `golog.Log` nunca espera a que el driver termine, y un único worker entrega los logs en el orden en que se emitieron. Los inserts de fondo usan un contexto que no se cancela con el de la petición.
+
+**Tope y pérdida de logs:** es preferible perder logs a saturar la memoria o frenar la aplicación. Cada cola admite como máximo `LOG_QUEUE_MAX` logs pendientes (default 10000, incluye los que se están escribiendo). Al alcanzarlo se **descartan los logs nuevos** (se conservan los más antiguos, en orden) y se avisa por stderr con el número de logs descartados. Un valor `<= 0` usa el default.
 
 ## Métricas sugeridas (externo)
 
@@ -199,12 +270,12 @@ Instrumentar (no incluido):
 - Tamaño medio batch
 - Flush count por timeout / tamaño
 - Latencia driver (p95 / p99)
-- Backlog cola async (len(channel))
+- Tamaño de la cola async
 
 ## Rendimiento
 
 Optimizado:
-- Sin doble marshal json→bson
+- Documentos construidos directamente como `map[string]any` (sin doble serialización)
 - Batching configurable
 - Buffers y pooling (sync.Pool)
 - Escrituras agrupadas
@@ -213,8 +284,12 @@ Impacto típico: reducción ~0.5–1.5 ms bajo carga por amortizar I/O.
 
 ## Limitaciones
 
-- Pérdida de logs si el proceso se aborta sin ejecutar Close (normal en batching).
+- Pérdida de logs si el proceso se aborta sin ejecutar Close (normal en batching) o si se llena la cola (`LOG_QUEUE_MAX`).
 - Sin rotación por tamaño (solo diaria). Se puede añadir.
+- Los payloads se copian antes de encolarse: mapas y slices se duplican (estructuras con ciclos se cortan en 32 niveles con `<max depth>`). Los **structs** se copian solo de forma superficial: un mapa o slice *dentro* de un struct sigue compartido con tu código, así que no lo modifiques de forma concurrente mientras lo logueas.
+- Un panic en un driver o al serializar un payload se captura y se registra; nunca tumba la aplicación.
+- El timeout por driver solo corta drivers que respetan el `context`. Uno que se bloquee sin mirarlo (p. ej. una escritura a un disco colgado) puede retener la goroutine de fondo y, con ella, `Close()`.
+- Los logs emitidos después de `Close()` se insertan de forma síncrona (no se pierden, pero no pasan por la cola).
 
 ## Roadmap (ideas)
 
@@ -225,7 +300,15 @@ Impacto típico: reducción ~0.5–1.5 ms bajo carga por amortizar I/O.
 
 ## Licencia
 
-MIT (agregar LICENSE).
+Licencia propia de uso gratuito con restricciones de comercialización (ver el archivo LICENSE; no es una licencia OSI/open source). Resumen, sin sustituir al texto completo:
+
+- **Permitido:** usar, copiar y modificar la librería e integrarla en aplicaciones y servicios, incluidos los que generan ingresos (SaaS, consultoría, servicios administrados), mientras el cobro no sea por el software en sí.
+- **Prohibido:** vender, licenciar o revender la librería (original o fork) como producto independiente, ofrecerla con precio en marketplaces o catálogos, re-etiquetarla como producto propio, sub-licenciarla con una licencia más permisiva o empaquetarla para explotación por terceros.
+- **Forks:** permitidos si conservan la licencia y la atribución al autor.
+
+## Requisitos
+
+Go 1.27 o superior (se usa el paquete estándar `uuid`).
 
 ---
 Contribuciones: PRs
