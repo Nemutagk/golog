@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/Nemutagk/golog/driver/file"
 	"github.com/Nemutagk/golog/helper"
 	"github.com/Nemutagk/golog/models"
+	"github.com/Nemutagk/golog/redact"
 )
 
 var connectManagerOnce sync.Once
@@ -24,6 +26,9 @@ var connectManagerOnce sync.Once
 // cualquier goroutine que loguee o llame a Close: atomic.Pointer para que
 // Log/Close concurrentes con Init no sean un data race.
 var logService atomic.Pointer[models.Service]
+
+// redactor es nil mientras el enmascarado no se active con WithRedaction (o cualquier WithRedact*).
+var redactor atomic.Pointer[redact.Redactor]
 
 // silenced controla el silenciamiento global (sin consola y sin drivers).
 // silencedSet distingue un valor fijado explícitamente de tener que aplicar el
@@ -69,6 +74,8 @@ type config struct {
 	fileNameLimit   *int
 	appName         *string
 	appEnv          *string
+
+	redact *redact.Config // no nil = enmascarado activado
 }
 
 type RequestID string
@@ -169,6 +176,42 @@ func WithAppName(name string) Option { return func(c *config) { c.appName = &nam
 // WithAppEnv fija el valor del bloque "env" del encabezado.
 func WithAppEnv(env string) Option { return func(c *config) { c.appEnv = &env } }
 
+// rc crea la configuración de enmascarado la primera vez: cualquier opción WithRedact* lo activa.
+func (c *config) rc() *redact.Config {
+	if c.redact == nil {
+		c.redact = &redact.Config{}
+	}
+	return c.redact
+}
+
+// WithRedaction activa el enmascarado de datos sensibles con las reglas por defecto
+// (claves como password/token, JWT, Bearer, tarjetas, correos...). Está desactivado por defecto.
+func WithRedaction() Option { return func(c *config) { c.rc() } }
+
+// WithRedactKeys añade palabras que vuelven sensible una clave de mapa, campo o JSON.
+func WithRedactKeys(keys ...string) Option {
+	return func(c *config) { r := c.rc(); r.Keys = append(r.Keys, keys...) }
+}
+
+// WithRedactAllow excluye claves exactas (p. ej. token_count) del enmascarado por nombre.
+func WithRedactAllow(keys ...string) Option {
+	return func(c *config) { r := c.rc(); r.Allow = append(r.Allow, keys...) }
+}
+
+// WithRedactPattern añade un patrón propio; mask recibe el texto que coincidió.
+func WithRedactPattern(name string, re *regexp.Regexp, mask func(string) string) Option {
+	return func(c *config) { r := c.rc(); r.Rules = append(r.Rules, redact.Rule{Name: name, Re: re, Mask: mask}) }
+}
+
+// WithRedactDisable desactiva reglas por defecto por nombre: private_key, jwt, bearer,
+// aws_key, url_credentials, secret_pair, card, email.
+func WithRedactDisable(names ...string) Option {
+	return func(c *config) { r := c.rc(); r.Disable = append(r.Disable, names...) }
+}
+
+// WithRedactPhones activa el detector de teléfonos (propenso a falsos positivos).
+func WithRedactPhones() Option { return func(c *config) { c.rc().Phones = true } }
+
 // apply pisa los valores de s (entorno/defaults) con los fijados por opciones.
 func (c *config) apply(s *helper.Settings) {
 	if c.timezone != nil {
@@ -254,6 +297,9 @@ func Init(opts ...Option) {
 		settings, used := helper.SettingsFromEnv()
 		cfg.apply(&settings)
 		helper.SetSettings(&settings)
+		if cfg.redact != nil {
+			redactor.Store(redact.New(*cfg.redact))
+		}
 		if cfg.silent != nil {
 			SetSilent(*cfg.silent)
 		}
@@ -326,6 +372,11 @@ func baseLogWithTrailer(ctx context.Context, level, trailer string, skip int, ar
 	// para que cualquier dato adicional (p.ej. el stack trace) no sea
 	// interpretado por fmt.Sprintf como argumento extra.
 	args = resolveFormatVerbs(args)
+
+	// Enmascarar antes de la consola y de los drivers: ambos reciben lo mismo.
+	if r := redactor.Load(); r != nil {
+		args = r.Values(args)
+	}
 
 	payload := args
 	if trailer != "" {

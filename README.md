@@ -155,6 +155,51 @@ golog las lee con `os.Getenv` al iniciar (no al importarse), así que si cargas 
 | LOG_ROTATE_LOCAL_TIME | `WithRotateLocalTime` |
 | GOLOG_SILENT | `WithSilent` |
 
+## Enmascarado de datos sensibles
+
+golog puede ocultar contraseñas, tokens, correos, tarjetas, etc. antes de que lleguen a la consola o a los drivers (archivo, base de datos). Está **desactivado por defecto**: se activa con `WithRedaction()` y no usa variables de entorno.
+
+```go
+golog.Init(
+  golog.WithFileDriver("./logs", true),
+  golog.WithRedaction(),                    // reglas por defecto
+  golog.WithRedactAllow("token_count"),     // claves que NO se tocan
+  golog.WithRedactKeys("rfc", "curp"),      // palabras extra que vuelven sensible una clave
+)
+```
+
+Cada dato enmascarado lleva una etiqueta que dice qué era:
+
+| Dato | Se muestra |
+|------|------------|
+| password, secret, cvv, llave privada, credenciales en URL | `[password:********]` (nunca parte del valor) |
+| token, API key, JWT, `Bearer ...`, clave de AWS | `[token:eyJh…]` (4 primeros caracteres; si mide menos de 12, se oculta entero) |
+| correo | `[email:j***@dominio.com]` |
+| tarjeta (solo números que pasan Luhn) | `[card:**** **** **** 1111]` |
+| teléfono (opt-in con `WithRedactPhones()`) | `[phone:***5678]` |
+
+**Cómo detecta:**
+1. **Por nombre de clave** en mapas, campos de struct y JSON: `password`, `passwd`, `secret`, `token`, `apikey`, `authorization`, `cookie`, `cvv`, `email`... (sin distinguir mayúsculas ni `_`/`-`). Ampliable con `WithRedactKeys`; excluible con `WithRedactAllow`.
+2. **Por patrón dentro de los textos:** JWT, `Bearer`, claves de AWS, llaves privadas PEM, `usuario:clave@host` en URLs, pares `password=...`/`"token": "..."`, tarjetas y correos. Desactivables por nombre con `WithRedactDisable("email")` (`private_key`, `jwt`, `bearer`, `aws_key`, `url_credentials`, `secret_pair`, `card`, `email`) y ampliables con `WithRedactPattern(nombre, regexp, mascara)`.
+3. **Por tag en tus structs**, para lo que no se puede adivinar:
+   ```go
+   type Usuario struct {
+       Nombre  string
+       Correo  string `golog:"email"`    // [email:a***@dominio.com]
+       Clave   string `golog:"password"` // [password:********]
+       Interno string `golog:"-"`        // el campo no aparece en el log
+   }
+   ```
+
+Los errores pasados como argumento (`golog.Log(ctx, "fallo", err)`) se convierten en texto y también se enmascaran (p. ej. una cadena de conexión con contraseña).
+
+**Limitaciones:**
+- Una contraseña logueada como texto suelto (`Log(ctx, "clave", "abc123")`) no se puede reconocer: usa un nombre de clave o un tag.
+- Un struct que contiene algo enmascarado se muestra como mapa (claves en orden alfabético); uno sin datos sensibles conserva su formato.
+- Los campos no exportados no se inspeccionan, y los tipos con `MarshalJSON`/`MarshalText` (como `time.Time`) se dejan como están.
+- Puede haber falsos positivos (usa `WithRedactAllow`) y falsos negativos: ninguna detección es perfecta.
+- Cuesta CPU en el hilo de quien loguea: unos 8 µs por log típico medidos en un equipo de desarrollo, solo con el enmascarado activo.
+
 ## Silenciamiento
 
 El logger puede silenciarse para no imprimir a consola ni escribir a drivers.

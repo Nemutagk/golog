@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"errors"
 	"github.com/Nemutagk/golog/helper"
 	"runtime"
 	"strconv"
@@ -404,5 +405,12 @@ func TestServiceAndBatchReadSettings(t *testing.T) {
 	defer bd.Close()
 	if bd.max != 3 || bd.driverTimeout != 2*time.Second {
 		t.Fatalf("batch: max=%d timeout=%v", bd.max, bd.driverTimeout)
+	}
+}
+
+// Un error en el payload conserva su mensaje (antes se serializaba como {}).
+func TestSanitizeKeepsErrorMessage(t *testing.T) {
+	if got := deepSanitize(errors.New("boom")); got != "boom" {
+		t.Fatalf("got %#v", got)
 	}
 }

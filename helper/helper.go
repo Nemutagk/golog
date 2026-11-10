@@ -85,7 +85,7 @@ func IsAlpha(b byte) bool {
 // IsSimple reporta si v es un valor primitivo imprimible sin JSON.
 func IsSimple(v any) bool {
 	switch v.(type) {
-	case string, fmt.Stringer,
+	case string, fmt.Stringer, error, // error: se imprime su mensaje (no como un struct vacío {})
 		int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64,
 		float32, float64,

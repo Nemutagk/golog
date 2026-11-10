@@ -35,6 +35,8 @@
 - DEPRECADO: las variables de entorno (`GOLOG_SILENT`, `LOG_TIMEZONE`, `LOG_ROTATE_LOCAL_TIME`, `LOG_BATCH_*`, `LOG_QUEUE_MAX`, `LOG_DRIVER_TIMEOUT_MS`, `GOLOG_BLOCKING_INFO`, `GOLOG_FILE_LIMIT`, `APP_NAME`, `APP_ENV`) siguen funcionando como respaldo pero se eliminarán en una versión futura; `Init` avisa por stderr de las que se estén usando. Cambio de comportamiento: se leen con `os.Getenv` (si usas un `.env`, cárgalo antes de `Init`) y un valor vacío cuenta como no definido.
 - Añadido en `helper`: `Settings`, `Config`, `SetSettings`, `ResetSettings`, `SettingsFromEnv`.
 - Corregido: un intervalo de batching `<= 0` (p. ej. `LOG_BATCH_FLUSH_MS_FILE=0`) dejaba una goroutine al 100 % de CPU; ahora usa 100 ms.
+- Añadido: enmascarado de datos sensibles (contraseñas, tokens, JWT, Bearer, claves de AWS, llaves privadas, credenciales en URL, tarjetas con Luhn, correos), con máscaras parciales etiquetadas (`[email:j***@dominio.com]`, `[password:********]`). Desactivado por defecto; se activa con `WithRedaction()`. Opciones: `WithRedactKeys`, `WithRedactAllow`, `WithRedactPattern`, `WithRedactDisable`, `WithRedactPhones`; tags `golog:"email|password|token|card|..."` y `golog:"-"` en structs. Nuevo paquete `redact`. Se aplica una sola vez antes de la consola y de los drivers.
+- Corregido: un `error` pasado como argumento se imprimía como `{}` en consola y archivo (se perdía el mensaje); ahora se imprime su mensaje. Cambio de comportamiento: quien ya logueaba errores sueltos verá el mensaje en lugar de `{}`.
 - Limpieza: eliminado código comentado, `bufio` redundante y funciones duplicadas; README actualizado (licencia, variables de entorno, drivers).
 
 ## v0.2.0

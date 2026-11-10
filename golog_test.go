@@ -14,6 +14,7 @@ import (
 
 	"github.com/Nemutagk/golog/driver/file"
 	"github.com/Nemutagk/golog/helper"
+	"github.com/Nemutagk/golog/redact"
 )
 
 // captureStdout redirige stdout durante f y devuelve lo escrito.
@@ -429,5 +430,75 @@ func TestConsoleHeaderBlocksFromSettings(t *testing.T) {
 	out := captureStdout(t, func() { Log(context.Background(), "hola") })
 	if !strings.Contains(out, "[mi-app][INFO]\n") {
 		t.Fatalf("encabezado inesperado: %q", out)
+	}
+}
+
+func TestConsoleRedaction(t *testing.T) {
+	prev := IsSilent()
+	SetSilent(false)
+	defer SetSilent(prev)
+	redactor.Store(redact.New(redact.Config{}))
+	defer redactor.Store(nil)
+
+	out := captureStdout(t, func() {
+		Log(context.Background(), "login password=abc123", map[string]any{"token": "abcdefghijklmnop"}, errors.New("dial postgres://u:pw@h/db"))
+	})
+	for _, secreto := range []string{"abc123", "abcdefghijklmnop", "pw@h"} {
+		if strings.Contains(out, secreto) {
+			t.Fatalf("el secreto %q salió en claro:\n%s", secreto, out)
+		}
+	}
+	if !strings.Contains(out, "[password:********]") || !strings.Contains(out, "[token:abcd") {
+		t.Fatalf("faltan las máscaras etiquetadas:\n%s", out)
+	}
+}
+
+// Sin WithRedaction la salida no cambia (compatibilidad).
+func TestRedactionIsOffByDefault(t *testing.T) {
+	prev := IsSilent()
+	SetSilent(false)
+	defer SetSilent(prev)
+	redactor.Store(nil)
+
+	out := captureStdout(t, func() {
+		Log(context.Background(), "login password=abc123")
+	})
+	if !strings.Contains(out, "password=abc123") {
+		t.Fatalf("sin enmascarado el texto debe salir intacto:\n%s", out)
+	}
+}
+
+// Cualquier opción WithRedact* activa el enmascarado y se acumulan.
+func TestRedactOptionsBuildConfig(t *testing.T) {
+	cfg := &config{}
+	if cfg.redact != nil {
+		t.Fatal("desactivado por defecto")
+	}
+	for _, o := range []Option{
+		WithRedactKeys("rfc"), WithRedactAllow("token_count"), WithRedactDisable("email"),
+		WithRedactPhones(), WithRedactPattern("curp", regexp.MustCompile(`[A-Z]{4}\d{6}`), func(string) string { return "[curp]" }),
+	} {
+		o(cfg)
+	}
+	r := cfg.redact
+	if r == nil || len(r.Keys) != 1 || len(r.Allow) != 1 || len(r.Disable) != 1 || !r.Phones || len(r.Rules) != 1 {
+		t.Fatalf("config inesperada: %+v", r)
+	}
+	if got := redact.New(*r).String("clave ABCD123456 y a@b.com"); got != "clave [curp] y a@b.com" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Un error pasado como argumento muestra su mensaje (antes se imprimía como {}).
+func TestErrorArgumentPrintsMessage(t *testing.T) {
+	prev := IsSilent()
+	SetSilent(false)
+	defer SetSilent(prev)
+
+	out := captureStdout(t, func() {
+		Log(context.Background(), "fallo", errors.New("boom"))
+	})
+	if !strings.Contains(out, "boom") || strings.Contains(out, "{}") {
+		t.Fatalf("salida inesperada:\n%s", out)
 	}
 }

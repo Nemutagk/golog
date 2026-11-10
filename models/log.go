@@ -171,6 +171,10 @@ func sanitize(v any, depth int) any {
 		return "<max depth>"
 	}
 
+	if e, ok := v.(error); ok {
+		return e.Error() // sin esto, *errors.errorString se desreferencia a un struct vacío y se imprime {}
+	}
+
 	rv := reflect.ValueOf(v)
 	rt := rv.Type()
 
